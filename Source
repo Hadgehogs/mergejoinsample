@@ -1,0 +1,270 @@
+unit Unit2;
+
+interface
+
+uses
+  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants,
+  System.Classes, Vcl.Graphics,
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls,
+  System.Generics.Collections, IdGlobal, IdHash, IdHashMessageDigest;
+
+type
+  TUINT128 = record
+    Left: UINT64;
+    Rigth: UINT64;
+  end;
+
+type
+  TTrack = Class
+    Name: String;
+    HashCode: TUINT128;
+  End;
+
+  TUser = Class
+    TracksList: TList;
+    Name: string;
+    procedure GenerateTrackList();
+    procedure HashTrackList();
+    procedure SortTrackList();
+  End;
+
+type
+  TForm2 = class(TForm)
+    CreateData: TButton;
+    CompareData: TButton;
+    Memo1: TMemo;
+    procedure CreateDataClick(Sender: TObject);
+    procedure CompareDataClick(Sender: TObject);
+  private
+    { Private declarations }
+  public
+    { Public declarations }
+  end;
+
+var
+  Form2: TForm2;
+  userList: TObjectList<TUser>;
+
+  realWords: String =
+    'Elizarov1;Elizarov2;Elizarov3;Elizarov4;Elizarov5;Elizarov6;Elizarov7;Elizarov8;Elizarov9;Elizarov10';
+
+implementation
+
+var
+  MainData: Array of TStringList;
+
+{$R *.dfm}
+
+procedure TForm2.CreateDataClick(Sender: TObject);
+var
+  i: integer;
+  newUser: TUser;
+begin
+  userList := TObjectList<TUser>.Create();
+  for i := 1 to 20 do
+  begin
+    newUser := TUser.Create;
+    newUser.Name := 'user' + inttostr(i);
+    newUser.GenerateTrackList();
+    userList.Add(newUser);
+  end;
+
+end;
+
+function getDummyTrackName(): String;
+var
+  i: integer;
+  currentsymb: string;
+  currentsymbCode: byte;
+begin
+  Result := '';
+  randomize;
+  for i := 1 to 20 do
+  begin
+    currentsymbCode := 65 + Random(25);
+    currentsymb := chr(currentsymbCode);
+    Result := Result + currentsymb;
+  end;
+end;
+
+{ TUser }
+
+procedure TUser.GenerateTrackList;
+var
+  i: integer;
+  realwordIndex: integer;
+  CurrentTrackName: String;
+  CurrentTrack: TTrack;
+  realWordsList: TStringList;
+begin
+  realWordsList := TStringList.Create;
+  realWordsList.Delimiter := ';';
+  realWordsList.DelimitedText := realWords;
+
+  TracksList := TList.Create;
+
+  realwordIndex := 0;
+  for i := 1 to 100000 do
+  begin
+    if i mod 100 = 0 then
+    begin
+      CurrentTrackName := realWordsList.Strings[realwordIndex];
+      inc(realwordIndex);
+      if realwordIndex >= realWordsList.Count then
+        realwordIndex := 0;
+    end
+    else
+      CurrentTrackName := getDummyTrackName();
+    CurrentTrack := TTrack.Create;
+    CurrentTrack.Name := CurrentTrackName;
+    TracksList.Add(CurrentTrack);
+  end;
+  realWordsList.Free;
+end;
+
+procedure TUser.HashTrackList;
+var
+  i: integer;
+  CurrentTrack: TTrack;
+  hashMessageDigest5: TIdHashMessageDigest5;
+  tmpHash: TidBytes;
+begin
+  hashMessageDigest5 := TIdHashMessageDigest5.Create;
+  for i := 0 to TracksList.Count - 1 do
+  begin
+    CurrentTrack := TracksList.Items[i];
+    tmpHash := hashMessageDigest5.HashString(CurrentTrack.Name);
+    CopyMemory(@CurrentTrack.HashCode, tmpHash, 16);
+  end;
+  hashMessageDigest5.Free;
+end;
+
+function CompareTwoUINT128(fisrt, second: TUINT128): integer;
+begin
+  Result := 0;
+  if fisrt.Left > second.Left then
+  begin
+    Result := 1;
+    exit;
+  end;
+  if fisrt.Left < second.Left then
+  begin
+    Result := -1;
+    exit;
+  end;
+  if fisrt.Rigth > second.Rigth then
+  begin
+    Result := 1;
+    exit;
+  end;
+  if fisrt.Rigth < second.Rigth then
+  begin
+    Result := -1;
+    exit;
+  end;
+end;
+
+function CompareTwoTracks(Track1, Track2: TTrack): integer;
+begin
+  Result := CompareTwoUINT128(Track1.HashCode, Track2.HashCode);
+end;
+
+procedure TUser.SortTrackList;
+var
+  i: integer;
+  CurrentTrack: TTrack;
+begin
+  TracksList.Sort(@CompareTwoTracks);
+end;
+
+procedure TForm2.CompareDataClick(Sender: TObject);
+var
+  i: integer;
+  currentUser: TUser;
+  maxTrackHash: TUINT128;
+  TrackPositionsArray: Array of integer;
+  commonTrackList: TList;
+  CurrentTrack, CommonTrack: TTrack;
+  CurrentTrackIndex: integer;
+  CompareResult: integer;
+  itsCommonTrack: Boolean;
+  AllUsersExecuted: Boolean;
+  StartTime, EndTime: Cardinal;
+  TrackAlwaysAdd: Boolean;
+begin
+  StartTime := GetTickCount;
+  commonTrackList := TList.Create;
+  maxTrackHash.Left := 0;
+  maxTrackHash.Rigth := 0;
+  SetLength(TrackPositionsArray, userList.Count);
+  for i := 0 to userList.Count - 1 do
+  begin
+    TrackPositionsArray[i] := -1;
+    currentUser := userList.Items[i];
+    currentUser.HashTrackList(); // Хешируем треки каждого пользователя
+    currentUser.SortTrackList(); // Сортируем по хешам для возможности MergeJoin
+  end;
+
+  while True do
+  begin // MergeJoin
+    itsCommonTrack := True;
+    AllUsersExecuted := True;
+    for i := 0 to userList.Count - 1 do
+    begin
+      currentUser := userList.Items[i];
+      CurrentTrackIndex := TrackPositionsArray[i];
+      while True do
+      begin
+        inc(CurrentTrackIndex);
+        if CurrentTrackIndex >= currentUser.TracksList.Count then
+          break;
+        AllUsersExecuted := false;
+        TrackPositionsArray[i] := CurrentTrackIndex;
+        CurrentTrack := currentUser.TracksList.Items[CurrentTrackIndex];
+        CompareResult := CompareTwoUINT128(CurrentTrack.HashCode, maxTrackHash);
+        case CompareResult of
+          - 1:
+            Continue;
+          0:
+            break;
+          1:
+            begin
+              dec(TrackPositionsArray[i]);
+              itsCommonTrack := false;
+              maxTrackHash := CurrentTrack.HashCode;
+              break;
+            end;
+        end;
+
+      end;
+      if itsCommonTrack = false then
+        break;
+    end;
+    if AllUsersExecuted then
+      break;
+    if (itsCommonTrack = True) and (CompareResult <> -1) then
+    begin
+      TrackAlwaysAdd := false;
+      for i := 0 to commonTrackList.Count - 1 do
+      begin
+        CommonTrack := TTrack(commonTrackList.Items[i]);
+        if CommonTrack.Name = CurrentTrack.Name then
+        begin
+          TrackAlwaysAdd := True;
+          break;
+        end;
+      end;
+      if TrackAlwaysAdd = false then
+        commonTrackList.Add(CurrentTrack);
+      for i := 0 to userList.Count - 1 do
+        inc(TrackPositionsArray[i]);
+    end;
+
+  end;
+  EndTime := GetTickCount;
+  for i := 0 to commonTrackList.Count - 1 do
+    Memo1.Lines.Add(TTrack(commonTrackList.Items[i]).Name);
+  Memo1.Lines.Add('Время выполнения,мсек: ' + inttostr(EndTime - StartTime));
+end;
+
+end.
